@@ -1,0 +1,132 @@
+---
+- name: Configure EKS Nodes
+  hosts: eks_nodes
+  become: true
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - python3-pip
+          - awscli
+          - jq
+          - curl
+          - unzip
+        state: present
+        update_cache: yes
+
+    - name: Install kubectl
+      shell: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+
+    - name: Install helm
+      shell: |
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+
+    - name: Configure AWS credentials
+      template:
+        src: aws_credentials.j2
+        dest: /root/.aws/credentials
+        mode: '0600'
+
+    - name: Configure AWS config
+      template:
+        src: aws_config.j2
+        dest: /root/.aws/config
+        mode: '0600'
+
+- name: Configure Jenkins Server
+  hosts: jenkins
+  become: true
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - openjdk-11-jdk
+          - maven
+          - git
+          - docker.io
+        state: present
+        update_cache: yes
+
+    - name: Add Jenkins repository key
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io.key
+        state: present
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: deb https://pkg.jenkins.io/debian-stable binary/
+        state: present
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+        update_cache: yes
+
+    - name: Start Jenkins service
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Add Jenkins to docker group
+      user:
+        name: jenkins
+        groups: docker
+        append: yes
+
+    - name: Configure Jenkins security
+      template:
+        src: jenkins_security.j2
+        dest: /var/lib/jenkins/config.xml
+        mode: '0644'
+      notify: restart jenkins
+
+  handlers:
+    - name: restart jenkins
+      service:
+        name: jenkins
+        state: restarted
+
+- name: Configure Monitoring Stack
+  hosts: monitoring
+  become: true
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - prometheus
+          - node-exporter
+          - grafana
+        state: present
+        update_cache: yes
+
+    - name: Configure Prometheus
+      template:
+        src: prometheus.yml.j2
+        dest: /etc/prometheus/prometheus.yml
+        mode: '0644'
+      notify: restart prometheus
+
+    - name: Configure Grafana
+      template:
+        src: grafana.ini.j2
+        dest: /etc/grafana/grafana.ini
+        mode: '0644'
+      notify: restart grafana
+
+  handlers:
+    - name: restart prometheus
+      service:
+        name: prometheus
+        state: restarted
+
+    - name: restart grafana
+      service:
+        name: grafana-server
+        state: restarted 
